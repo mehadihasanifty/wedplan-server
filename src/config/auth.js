@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { db, mongoClient } from "./database.js";
 
@@ -19,6 +20,14 @@ export const auth = betterAuth({
     phoneNumber: { type: "string", required: false, input: false },
     location: { type: "string", required: false, input: false },
     bio: { type: "string", required: false, input: false },
+  } },
+  databaseHooks: { user: {
+    update: { before: async (user) => {
+      if ("role" in user || "subscriptionPlan" in user || "blocked" in user) {
+        throw new APIError("FORBIDDEN", { message: "Account role, access, and subscription settings cannot be changed from profile updates." });
+      }
+      return { data: user };
+    } },
   } },
   ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? {
     socialProviders: { google: { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } },

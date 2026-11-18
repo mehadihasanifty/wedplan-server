@@ -38,8 +38,9 @@ try {
   process.exit(1);
 }
 
-const [{ adminRouter }, { bookingsRouter }, { handleStripeWebhook, paymentsRouter }, { profileRouter }, { servicesRouter }, { vendorBookingsRouter }] = await Promise.all([
+const [{ adminRouter }, { authTokenRouter }, { bookingsRouter }, { handleStripeWebhook, paymentsRouter }, { profileRouter }, { servicesRouter }, { vendorBookingsRouter }] = await Promise.all([
   import("./routes/admin.js"),
+  import("./routes/auth-token.js"),
   import("./routes/bookings.js"),
   import("./routes/payments.js"),
   import("./routes/profile.js"),
@@ -51,6 +52,7 @@ app.use("/api/services", servicesRouter);
 app.use("/api/bookings", bookingsRouter);
 app.use("/api/vendor/bookings", vendorBookingsRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/auth", authTokenRouter);
 app.use("/api/profile", profileRouter);
 app.use("/api/payments", paymentsRouter);
 
