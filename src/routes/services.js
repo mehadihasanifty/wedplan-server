@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { db } from "../config/database.js";
-import { requireRole, requireUser } from "../middleware/auth.js";
+import { optionalUser, requireRole, requireUser } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { escapeRegex, idOptions } from "../utils/ids.js";
 
@@ -8,15 +8,17 @@ export const servicesRouter = Router();
 const services = () => db.collection("services");
 const users = () => db.collection("user");
 
-servicesRouter.get("/", asyncRoute(async (req, res) => {
+servicesRouter.get("/", optionalUser, asyncRoute(async (req, res) => {
   const { search = "", category, location, sort = "", page = "1", limit = "100" } = req.query;
-  const filter = { status: "approved", isActive: true };
+  const vendorRequested = Boolean(req.query.vendorId);
+  if (vendorRequested && (!req.user || req.user.role !== "vendor")) return res.status(req.user ? 403 : 401).json({ message: "Sign in with a vendor account to view your services." });
+  const filter = vendorRequested ? { vendorId: { $in: idOptions(req.user.id) } } : { status: "approved", isActive: true };
   if (category) filter.category = String(category).slice(0, 100);
   if (location) filter.location = { $regex: escapeRegex(String(location).slice(0, 100)), $options: "i" };
   if (search) filter.serviceName = { $regex: escapeRegex(String(search).slice(0, 100)), $options: "i" };
   const take = Math.max(1, Math.min(Number(limit) || 100, 100));
   const currentPage = Math.max(1, Number(page) || 1);
-  const sortSpec = sort === "price-asc" ? { price: 1 } : sort === "price-desc" ? { price: -1 } : { createdAt: -1 };
+  const sortSpec = ["low", "price-asc"].includes(String(sort)) ? { price: 1 } : ["high", "price-desc"].includes(String(sort)) ? { price: -1 } : { createdAt: -1 };
   const results = await services().find(filter).sort(sortSpec).skip((currentPage - 1) * take).limit(take).toArray();
   res.json(await Promise.all(results.map(enrichService)));
 }));
@@ -34,7 +36,7 @@ servicesRouter.post("/", requireUser, requireRole("vendor"), asyncRoute(async (r
   const user = await users().findOne({ _id: { $in: idOptions(vendorId) } });
   const premium = ["premium", "pro"].includes(String(user?.subscriptionPlan || user?.plan || "").toLowerCase());
   if (!premium) {
-    const activeCount = await services().countDocuments({ vendorId, isActive: true, status: "approved" });
+    const activeCount = await services().countDocuments({ vendorId: { $in: idOptions(vendorId) }, isActive: true, status: "approved" });
     if (activeCount >= 3) return res.status(403).json({ message: "The free plan allows up to 3 active services. Upgrade to Premium to add more." });
   }
   const document = { ...input.value, vendorId, vendorName: req.user.name || "WedPlan vendor", status: "pending", isActive: true, createdAt: new Date(), updatedAt: new Date() };
@@ -66,6 +68,7 @@ async function enrichService(service) {
 }
 
 function validateService(body = {}, creating) {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return { error: "Provide service details as a JSON object." };
   const serviceName = String(body.serviceName || "").trim();
   const category = String(body.category || "").trim();
   const description = String(body.description || "").trim();
@@ -82,9 +85,11 @@ function validateService(body = {}, creating) {
   if (description) value.description = description.slice(0, 5000);
   if (location) value.location = location.slice(0, 200);
   if (body.price !== undefined && Number.isFinite(price) && price >= 0) value.price = price;
+  else if (body.price !== undefined) return { error: "Price must be a non-negative number." };
   if (body.images !== undefined) value.images = images;
   if (body.serviceImage !== undefined) value.serviceImage = serviceImage;
   if (body.currency) value.currency = String(body.currency).slice(0, 5);
   if (body.isActive !== undefined) value.isActive = Boolean(body.isActive);
+  if (!creating && Object.keys(value).length === 0) return { error: "Provide at least one valid service field to update." };
   return { value };
 }

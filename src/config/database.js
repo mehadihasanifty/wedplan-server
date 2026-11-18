@@ -11,4 +11,5 @@ export const db = mongoClient.db();
 export async function connectDatabase() {
   await mongoClient.connect();
   await db.command({ ping: 1 });
+  await db.collection("bookingSlots").createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: "booking_slot_expiry" });
 }

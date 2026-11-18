@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { ObjectId } from "mongodb";
 import { db } from "../config/database.js";
 import { requireRole, requireUser } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
@@ -26,18 +27,39 @@ bookingsRouter.post("/", requireUser, requireRole("customer"), asyncRoute(async 
   const vendorId = String(service.vendorId || service.vendor?.id || service.vendor?._id || "");
   if (!vendorId) return res.status(409).json({ message: "Vendor details are missing for this service." });
   if (vendorId === String(req.user.id)) return res.status(403).json({ message: "You cannot book your own service." });
-  const duplicate = await bookings().findOne({ serviceId: { $in: idOptions(serviceId) }, eventDate, status: { $in: ["pending", "accepted"] } });
+  const canonicalServiceId = service._id instanceof ObjectId ? service._id.toHexString() : String(service._id);
+  const duplicate = await bookings().findOne({ serviceId: { $in: idOptions(canonicalServiceId) }, eventDate, status: { $in: ["pending", "accepted"] } });
   if (duplicate) return res.status(409).json({ message: "An active booking request already exists for this service and event date." });
+
+  // Reserve the service/date slot atomically so simultaneous requests cannot
+  // both pass the duplicate check. A TTL expiry cleans up abandoned reservations.
+  const slotId = `${canonicalServiceId}:${eventDate}`;
+  const reservationToken = new ObjectId();
+  try {
+    await db.collection("bookingSlots").insertOne({ _id: slotId, token: reservationToken, expiresAt: new Date(Date.now() + 10 * 60 * 1000) });
+  } catch (error) {
+    if (error?.code !== 11000) throw error;
+    const previous = await db.collection("bookingSlots").findOne({ _id: slotId });
+    const previousBooking = previous?.bookingId ? await bookings().findOne({ _id: previous.bookingId, status: { $in: ["pending", "accepted"] } }) : null;
+    const reservationStillLive = previous && !previous.bookingId && previous.expiresAt && previous.expiresAt > new Date();
+    if (previousBooking || reservationStillLive || !previous) return res.status(409).json({ message: "An active booking request already exists for this service and event date." });
+    await db.collection("bookingSlots").deleteOne({ _id: slotId, token: previous.token });
+    try { await db.collection("bookingSlots").insertOne({ _id: slotId, token: reservationToken, expiresAt: new Date(Date.now() + 10 * 60 * 1000) }); }
+    catch (retryError) { if (retryError?.code === 11000) return res.status(409).json({ message: "An active booking request already exists for this service and event date." }); throw retryError; }
+  }
 
   const [customer, vendor] = await Promise.all([
     db.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { name: 1, email: 1, image: 1 } }),
     db.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }, { projection: { name: 1, email: 1, image: 1, businessName: 1 } }),
   ]);
-  const booking = { serviceId, vendorId, customerId: String(req.user.id), eventDate, eventLocation, ...(message ? { message } : {}), status: "pending", createdAt: new Date(), updatedAt: new Date(), service: { ...service, vendor }, customer, vendor };
+  const bookingId = new ObjectId();
+  const booking = { _id: bookingId, serviceId: canonicalServiceId, vendorId, customerId: String(req.user.id), eventDate, eventLocation, ...(message ? { message } : {}), status: "pending", createdAt: new Date(), updatedAt: new Date(), service: { ...service, vendor }, customer, vendor };
   try {
-    const result = await bookings().insertOne(booking);
-    res.status(201).json({ ...booking, _id: result.insertedId });
+    await bookings().insertOne(booking);
+    await db.collection("bookingSlots").updateOne({ _id: slotId, token: reservationToken }, { $set: { bookingId, expiresAt: null } });
+    res.status(201).json(booking);
   } catch (error) {
+    await db.collection("bookingSlots").deleteOne({ _id: slotId, token: reservationToken });
     if (error?.code === 11000) return res.status(409).json({ message: "An active booking request already exists for this service and event date." });
     throw error;
   }
@@ -56,6 +78,7 @@ bookingsRouter.patch("/:id", requireUser, asyncRoute(async (req, res) => {
   else return res.status(403).json({ message: "Your account cannot make this booking status change." });
   const result = await bookings().findOneAndUpdate(filter, { $set: { status, updatedAt: new Date() } }, { returnDocument: "after" });
   if (!result) return res.status(409).json({ message: "This booking is not yours or is no longer pending." });
+  if (status === "cancelled" || status === "rejected") await db.collection("bookingSlots").deleteOne({ _id: `${result.serviceId}:${result.eventDate}` });
   res.json(result);
 }));
 

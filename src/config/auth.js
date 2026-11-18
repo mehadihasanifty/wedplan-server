@@ -2,6 +2,10 @@ import { betterAuth } from "better-auth";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { db, mongoClient } from "./database.js";
 
+if (!process.env.BETTER_AUTH_SECRET?.trim()) {
+  throw new Error("BETTER_AUTH_SECRET must match the WedPlan client secret so API requests can verify sessions.");
+}
+
 export const auth = betterAuth({
   appName: "WedPlan",
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",

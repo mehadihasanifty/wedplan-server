@@ -56,6 +56,17 @@ adminRouter.patch("/services/:id", asyncRoute(async (req, res) => {
   const update = { updatedAt: new Date() };
   if (req.body?.status !== undefined) {
     if (!["approved", "rejected", "pending"].includes(req.body.status)) return res.status(400).json({ message: "Invalid service status." });
+    if (req.body.status === "approved") {
+      const current = await db.collection("services").findOne({ _id: { $in: idOptions(req.params.id) } });
+      if (!current) return res.status(404).json({ message: "Service not found." });
+      const vendorId = String(current.vendorId || "");
+      const vendor = vendorId ? await db.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }) : null;
+      const premium = ["premium", "pro"].includes(String(vendor?.subscriptionPlan || vendor?.plan || "").toLowerCase());
+      if (!premium) {
+        const activeCount = await db.collection("services").countDocuments({ vendorId: { $in: idOptions(vendorId) }, isActive: true, status: "approved", _id: { $ne: current._id } });
+        if (activeCount >= 3) return res.status(409).json({ message: "This vendor has reached the Free plan limit of 3 active services." });
+      }
+    }
     update.status = req.body.status;
   }
   if (req.body?.isActive !== undefined) update.isActive = Boolean(req.body.isActive);

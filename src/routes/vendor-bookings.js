@@ -27,5 +27,6 @@ vendorBookingsRouter.patch("/:id", asyncRoute(async (req, res) => {
     { $set: { status, updatedAt: new Date() } }, { returnDocument: "after" },
   );
   if (!booking) return res.status(409).json({ message: "This request is not yours or is no longer pending." });
+  if (status === "rejected") await db.collection("bookingSlots").deleteOne({ _id: `${booking.serviceId}:${booking.eventDate}` });
   res.json(booking);
 }));

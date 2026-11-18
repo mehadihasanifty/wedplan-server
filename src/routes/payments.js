@@ -38,6 +38,8 @@ export async function handleStripeWebhook(req, res) {
 
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const checkout = event.data.object;
+    const confirmedPaid = event.type === "checkout.session.async_payment_succeeded" || ["paid", "no_payment_required"].includes(checkout.payment_status);
+    if (!confirmedPaid) return res.json({ received: true, pending: true });
     const vendorId = checkout.metadata?.vendorId;
     await db.collection("transactions").updateOne(
       { stripeSessionId: checkout.id },
