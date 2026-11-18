@@ -4,12 +4,12 @@ Express API for the WedPlan Next.js client. The server uses the same MongoDB dat
 
 ## Local setup
 
-1. `MONGODB_URL` is set in both local `.env` files from the server example. It points to the local MongoDB database; replace it in both files if your database uses a different URI. A MongoDB service must be running at that address.
+1. `MONGODB_URL` is configured in both local `.env` files. Keep the client and server values pointed at the same database.
 2. Keep `BETTER_AUTH_SECRET` and `BETTER_AUTH_URL` synchronized with the client environment.
 3. `NEXT_PUBLIC_API_URL=http://localhost:5000/api` is set in the client `.env`; restart Next.js after environment changes.
 4. Start this API from `F:\Projects\wedplan-server` with `npm run dev`; start the client from `F:\Projects\wedplan-client` with `npm run dev`.
 
-`GET /api/health` reports API health. Configure `STRIPE_SECRET_KEY`, `STRIPE_PREMIUM_PRICE_ID`, and `STRIPE_WEBHOOK_SECRET` to enable Premium checkout and verified payment updates. The webhook endpoint is `POST /api/payments/webhook`.
+`GET /api/health` reports API health. In Stripe Test Mode, configure the server-only `STRIPE_SECRET_KEY` (`sk_test_…`), `STRIPE_PREMIUM_PRICE_ID` (`price_…`), and `STRIPE_WEBHOOK_SECRET` (`whsec_…`). For local webhook delivery, forward Stripe events to `http://localhost:5000/api/payments/webhook` and copy the signing secret from Stripe CLI into `.env`. Subscribe to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.paused`, `customer.subscription.resumed`, `invoice.paid`, `invoice.payment_succeeded`, and `invoice.payment_failed`. Enable the Stripe Customer Portal in Test Mode to let vendors manage or cancel subscriptions.
 
 ## API routes
 

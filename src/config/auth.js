@@ -15,6 +15,7 @@ export const auth = betterAuth({
   user: { additionalFields: {
     role: { type: "string", required: false, defaultValue: "customer", input: true },
     blocked: { type: "boolean", required: false, defaultValue: false, input: false },
+    subscriptionPlan: { type: "string", required: false, defaultValue: "free", input: false },
   } },
   ...(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET ? {
     socialProviders: { google: { clientId: process.env.GOOGLE_CLIENT_ID, clientSecret: process.env.GOOGLE_CLIENT_SECRET } },
