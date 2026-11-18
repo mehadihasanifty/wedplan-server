@@ -17,6 +17,7 @@ Express API for the WedPlan Next.js client. The server uses the same MongoDB dat
 - `POST /api/services`, `PATCH /api/services/:id`, `DELETE /api/services/:id` — vendor-owned service management.
 - `GET /api/bookings`, `POST /api/bookings`, `PATCH /api/bookings/:id` — customer booking list, creation, and pending cancellation.
 - `GET /api/vendor/bookings`, `PATCH /api/vendor/bookings/:id` — vendor-owned booking requests and pending accept/reject.
+- `PATCH /api/profile` — authenticated customer/vendor editable profile fields; role and subscription fields are rejected.
 - `/api/admin/*` — admin overview, users, service moderation, and read-only transactions.
 - `POST /api/payments/create-checkout-session` — vendor Premium checkout.
 

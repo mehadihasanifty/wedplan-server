@@ -38,10 +38,11 @@ try {
   process.exit(1);
 }
 
-const [{ adminRouter }, { bookingsRouter }, { handleStripeWebhook, paymentsRouter }, { servicesRouter }, { vendorBookingsRouter }] = await Promise.all([
+const [{ adminRouter }, { bookingsRouter }, { handleStripeWebhook, paymentsRouter }, { profileRouter }, { servicesRouter }, { vendorBookingsRouter }] = await Promise.all([
   import("./routes/admin.js"),
   import("./routes/bookings.js"),
   import("./routes/payments.js"),
+  import("./routes/profile.js"),
   import("./routes/services.js"),
   import("./routes/vendor-bookings.js"),
 ]);
@@ -50,6 +51,7 @@ app.use("/api/services", servicesRouter);
 app.use("/api/bookings", bookingsRouter);
 app.use("/api/vendor/bookings", vendorBookingsRouter);
 app.use("/api/admin", adminRouter);
+app.use("/api/profile", profileRouter);
 app.use("/api/payments", paymentsRouter);
 
 app.use((_request, response) => response.status(404).json({ message: "API endpoint not found." }));
