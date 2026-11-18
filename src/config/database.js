@@ -4,7 +4,7 @@ const uri = process.env.MONGODB_URL?.trim();
 if (!uri) throw new Error("MONGODB_URL must be set.");
 
 const globalMongo = globalThis;
-export const mongoClient = globalMongo.wedPlanMongoClient ?? new MongoClient(uri);
+export const mongoClient = globalMongo.wedPlanMongoClient ?? new MongoClient(uri, { serverSelectionTimeoutMS: 5000 });
 if (process.env.NODE_ENV !== "production") globalMongo.wedPlanMongoClient = mongoClient;
 export const db = mongoClient.db();
 
