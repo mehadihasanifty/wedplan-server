@@ -52,7 +52,11 @@ export function verifyAccessToken(request) {
   if (!token) return null;
   try {
     const payload = jwt.verify(token, jwtSecret, { algorithms: ["HS256"], issuer, audience });
-    if (!payload || typeof payload === "string" || typeof payload.sub !== "string") return null;
+    // jsonwebtoken validates exp when it exists, but a signed token without an
+    // exp claim would otherwise remain valid indefinitely. Access tokens must
+    // always be time-limited and have a non-empty subject.
+    if (!payload || typeof payload === "string" || typeof payload.sub !== "string" || !payload.sub.trim()) return null;
+    if (typeof payload.exp !== "number" || payload.exp <= Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch { return null; }
 }

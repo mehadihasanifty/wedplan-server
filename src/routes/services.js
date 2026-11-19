@@ -15,10 +15,21 @@ servicesRouter.get("/", optionalUser, asyncRoute(async (req, res) => {
   const filter = vendorRequested ? { vendorId: { $in: idOptions(req.user.id) } } : { status: "approved", isActive: true };
   if (category) filter.category = String(category).slice(0, 100);
   if (location) filter.location = { $regex: escapeRegex(String(location).slice(0, 100)), $options: "i" };
-  if (search) filter.serviceName = { $regex: escapeRegex(String(search).slice(0, 100)), $options: "i" };
+  const searchTerms = String(search).slice(0, 100).trim().split(/\s+/).filter(Boolean).slice(0, 8);
+  if (searchTerms.length) {
+    const searchableFields = ["serviceName", "category", "description", "location", "vendorName", "businessName", "vendor.name", "vendor.businessName"];
+    filter.$and = await Promise.all(searchTerms.map(async (term) => {
+      const expression = { $regex: escapeRegex(term), $options: "i" };
+      const matchingVendors = await users().find({ $or: [{ name: expression }, { businessName: expression }] }, { projection: { _id: 1 } }).limit(100).toArray();
+      const vendorIds = matchingVendors.flatMap((vendor) => idOptions(String(vendor._id)));
+      const alternatives = searchableFields.map((field) => ({ [field]: expression }));
+      if (vendorIds.length) alternatives.push({ vendorId: { $in: vendorIds } });
+      return { $or: alternatives };
+    }));
+  }
   const take = Math.max(1, Math.min(Number(limit) || 100, 100));
   const currentPage = Math.max(1, Number(page) || 1);
-  const sortSpec = ["low", "price-asc"].includes(String(sort)) ? { price: 1 } : ["high", "price-desc"].includes(String(sort)) ? { price: -1 } : { createdAt: -1 };
+  const sortSpec = ["low", "price-asc"].includes(String(sort)) ? { price: 1, _id: 1 } : ["high", "price-desc"].includes(String(sort)) ? { price: -1, _id: 1 } : { createdAt: -1, _id: -1 };
   const results = await services().find(filter).sort(sortSpec).skip((currentPage - 1) * take).limit(take).toArray();
   res.json(await Promise.all(results.map(enrichService)));
 }));
