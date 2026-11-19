@@ -61,7 +61,18 @@ app.use((_request, response) => response.status(404).json({ message: "API endpoi
 app.use((error, _request, response, _next) => {
   console.error("WedPlan API error:", error);
   if (response.headersSent) return;
-  response.status(error.status || error.statusCode || 500).json({ message: error.status ? error.message : "An unexpected server error occurred." });
+  const parserError = error?.type === "entity.parse.failed";
+  const duplicateError = error?.code === 11000;
+  const candidateStatus = Number(error?.status ?? error?.statusCode);
+  const status = parserError ? 400 : duplicateError ? 409 : Number.isInteger(candidateStatus) && candidateStatus >= 400 && candidateStatus <= 599 ? candidateStatus : 500;
+  const message = parserError
+    ? "Request body must contain valid JSON."
+    : duplicateError
+      ? "A record with these details already exists."
+      : status < 500 && typeof error?.message === "string"
+        ? error.message
+        : "An unexpected server error occurred. Please try again.";
+  response.status(status).json({ message });
 });
 
 app.listen(port, () => console.log(`WedPlan API server listening on http://localhost:${port}`));
