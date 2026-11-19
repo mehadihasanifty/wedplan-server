@@ -24,7 +24,7 @@ authTokenRouter.post("/token", async (request, response, next) => {
     }
 
     const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(session.user.id) } });
-    if (!user || user.blocked === true) {
+    if (!user || user.isBlocked === true || user.blocked === true) {
       clearAccessTokenCookie(response);
       return response.status(403).json({ message: "This account cannot access protected features." });
     }

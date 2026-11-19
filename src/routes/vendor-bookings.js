@@ -10,11 +10,12 @@ vendorBookingsRouter.use(requireUser, requireRole("vendor"));
 vendorBookingsRouter.get("/", asyncRoute(async (req, res) => {
   const list = await db.collection("bookings").find({ vendorId: { $in: idOptions(req.user.id) } }).sort({ createdAt: -1 }).limit(100).toArray();
   const enriched = await Promise.all(list.map(async (booking) => {
-    const [service, customer] = await Promise.all([
+    const [service, customer, vendor] = await Promise.all([
       db.collection("services").findOne({ _id: { $in: idOptions(booking.serviceId) } }),
       authDb.collection("user").findOne({ _id: { $in: idOptions(booking.customerId) } }, { projection: { name: 1, email: 1, image: 1 } }),
+      authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { name: 1, email: 1, image: 1, businessName: 1 } }),
     ]);
-    return { ...booking, service: service || booking.service, customer: customer || booking.customer };
+    return { ...booking, service: service ? { ...service, vendor } : null, customer: customer || null, vendor: vendor || null };
   }));
   res.json(enriched);
 }));

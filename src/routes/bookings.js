@@ -48,12 +48,8 @@ bookingsRouter.post("/", requireUser, requireRole("customer"), asyncRoute(async 
     catch (retryError) { if (retryError?.code === 11000) return res.status(409).json({ message: "An active booking request already exists for this service and event date." }); throw retryError; }
   }
 
-  const [customer, vendor] = await Promise.all([
-    authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { name: 1, email: 1, image: 1 } }),
-    authDb.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }, { projection: { name: 1, email: 1, image: 1, businessName: 1 } }),
-  ]);
   const bookingId = new ObjectId();
-  const booking = { _id: bookingId, serviceId: canonicalServiceId, vendorId, customerId: String(req.user.id), eventDate, eventLocation, ...(message ? { message } : {}), status: "pending", createdAt: new Date(), updatedAt: new Date(), service: { ...service, vendor }, customer, vendor };
+  const booking = { _id: bookingId, serviceId: canonicalServiceId, vendorId, customerId: String(req.user.id), eventDate, eventLocation, ...(message ? { message } : {}), status: "pending", createdAt: new Date(), updatedAt: new Date() };
   try {
     await bookings().insertOne(booking);
     await db.collection("bookingSlots").updateOne({ _id: slotId, token: reservationToken }, { $set: { bookingId, expiresAt: null } });
@@ -87,5 +83,5 @@ async function enrichBooking(booking) {
   const customer = booking.customerId ? await authDb.collection("user").findOne({ _id: { $in: idOptions(booking.customerId) } }, { projection: { name: 1, email: 1, image: 1 } }) : null;
   const vendorId = booking.vendorId || service?.vendorId;
   const vendor = vendorId ? await authDb.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }, { projection: { name: 1, email: 1, image: 1, businessName: 1 } }) : null;
-  return { ...booking, service: service ? { ...service, vendor } : booking.service, customer: customer || booking.customer, vendor: vendor || booking.vendor };
+  return { ...booking, service: service ? { ...service, vendor } : null, customer: customer || null, vendor: vendor || null };
 }

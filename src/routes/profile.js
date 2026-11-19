@@ -9,7 +9,7 @@ export const profileRouter = Router();
 profileRouter.patch("/", requireUser, requireRole("vendor", "customer"), asyncRoute(async (req, res) => {
   const body = req.body;
   if (!body || typeof body !== "object" || Array.isArray(body)) return res.status(400).json({ message: "Provide profile fields as a JSON object." });
-  const forbidden = ["role", "subscriptionPlan", "plan", "blocked", "stripeCustomerId", "stripeSubscriptionId"];
+  const forbidden = ["role", "subscriptionPlan", "subscriptionExpiresAt", "plan", "isBlocked", "blocked", "stripeCustomerId", "stripeSubscriptionId"];
   if (forbidden.some((key) => Object.prototype.hasOwnProperty.call(body, key))) {
     return res.status(403).json({ message: "Role, access, and subscription settings cannot be changed through profile settings." });
   }
@@ -23,6 +23,11 @@ profileRouter.patch("/", requireUser, requireRole("vendor", "customer"), asyncRo
     if (typeof body.image !== "string" || body.image.length > 2048 || (body.image && !isAllowedImageUrl(body.image))) return res.status(400).json({ message: "Profile image must be a valid HTTPS image URL." });
     update.image = body.image || null;
   }
+  if (Object.prototype.hasOwnProperty.call(body, "businessName")) {
+    if (req.user.role !== "vendor") return res.status(403).json({ message: "Only vendors can update a business name." });
+    if (typeof body.businessName !== "string" || !body.businessName.trim() || body.businessName.trim().length > 120) return res.status(400).json({ message: "Business name is required and must be 120 characters or fewer." });
+    update.businessName = body.businessName.trim();
+  }
   for (const [key, max] of [["phoneNumber", 32], ["location", 120], ["bio", 500]]) {
     if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
     if (typeof body[key] !== "string" || body[key].trim().length > max) return res.status(400).json({ message: `${key} must be ${max} characters or fewer.` });
@@ -34,7 +39,7 @@ profileRouter.patch("/", requireUser, requireRole("vendor", "customer"), asyncRo
   const user = await authDb.collection("user").findOneAndUpdate(
     { _id: { $in: idOptions(req.user.id) } },
     { $set: update },
-    { returnDocument: "after", projection: { name: 1, email: 1, image: 1, role: 1, phoneNumber: 1, location: 1, bio: 1, subscriptionPlan: 1, plan: 1 } },
+    { returnDocument: "after", projection: { name: 1, email: 1, image: 1, role: 1, businessName: 1, phoneNumber: 1, location: 1, bio: 1, subscriptionPlan: 1, subscriptionExpiresAt: 1 } },
   );
   if (!user) return res.status(404).json({ message: "Your account could not be found." });
   res.json({ profile: user, message: "Profile saved successfully." });

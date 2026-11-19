@@ -23,16 +23,17 @@ adminRouter.get("/users", asyncRoute(async (req, res) => {
   if (["admin", "vendor", "customer"].includes(role)) filter.role = role;
   if (search) { const re = new RegExp(escapeRegex(search), "i"); filter.$or = [{ name: re }, { email: re }]; }
   const [list, total] = await Promise.all([
-    authDb.collection("user").find(filter).project({ name: 1, email: 1, role: 1, image: 1, blocked: 1, createdAt: 1, businessName: 1 }).sort({ createdAt: -1 }).skip((page - 1) * 20).limit(20).toArray(),
+    authDb.collection("user").find(filter).project({ name: 1, email: 1, role: 1, image: 1, isBlocked: 1, blocked: 1, createdAt: 1, businessName: 1 }).sort({ createdAt: -1 }).skip((page - 1) * 20).limit(20).toArray(),
     authDb.collection("user").countDocuments(filter),
   ]);
-  res.json({ users: list, total, page, limit: 20 });
+  res.json({ users: list.map(({ blocked, ...user }) => ({ ...user, isBlocked: user.isBlocked ?? blocked ?? false })), total, page, limit: 20 });
 }));
 
 adminRouter.patch("/users/:id", asyncRoute(async (req, res) => {
   if (String(req.user.id) === String(req.params.id)) return res.status(400).json({ message: "You cannot block your own admin account." });
-  if (typeof req.body?.blocked !== "boolean") return res.status(400).json({ message: "Provide blocked as true or false." });
-  const user = await authDb.collection("user").findOneAndUpdate({ _id: { $in: idOptions(req.params.id) } }, { $set: { blocked: req.body.blocked, updatedAt: new Date() } }, { returnDocument: "after", projection: { name: 1, email: 1, role: 1, blocked: 1 } });
+  const isBlocked = req.body?.isBlocked ?? req.body?.blocked;
+  if (typeof isBlocked !== "boolean") return res.status(400).json({ message: "Provide isBlocked as true or false." });
+  const user = await authDb.collection("user").findOneAndUpdate({ _id: { $in: idOptions(req.params.id) } }, { $set: { isBlocked, updatedAt: new Date() }, $unset: { blocked: "" } }, { returnDocument: "after", projection: { name: 1, email: 1, role: 1, isBlocked: 1 } });
   if (!user) return res.status(404).json({ message: "User not found." });
   res.json(user);
 }));
@@ -98,7 +99,7 @@ adminRouter.patch("/services/:id", asyncRoute(async (req, res) => {
       if (!current) return res.status(404).json({ message: "Service not found." });
       const vendorId = String(current.vendorId || "");
       const vendor = vendorId ? await authDb.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }) : null;
-      const premium = ["premium", "pro"].includes(String(vendor?.subscriptionPlan || vendor?.plan || "").toLowerCase());
+      const premium = ["premium", "pro"].includes(String(vendor?.subscriptionPlan || "").toLowerCase());
       if (!premium) {
         const activeCount = await db.collection("services").countDocuments({ vendorId: { $in: idOptions(vendorId) }, isActive: true, status: "approved", _id: { $ne: current._id } });
         if (activeCount >= 3) return res.status(409).json({ message: "This vendor has reached the Free plan limit of 3 active services." });
@@ -120,7 +121,7 @@ adminRouter.delete("/services/:id", asyncRoute(async (req, res) => {
 }));
 
 adminRouter.get("/transactions", asyncRoute(async (_req, res) => {
-  const items = await db.collection("transactions").find({}).project({ vendorId: 1, vendor: 1, plan: 1, planName: 1, subscriptionPlan: 1, amount: 1, paymentAmount: 1, amountCents: 1, currency: 1, status: 1, paymentStatus: 1, createdAt: 1, transactionDate: 1 }).sort({ createdAt: -1 }).limit(300).toArray();
+  const items = await db.collection("transactions").find({}).project({ vendorId: 1, plan: 1, amount: 1, currency: 1, stripeSessionId: 1, stripeSubscriptionId: 1, stripeInvoiceId: 1, status: 1, createdAt: 1 }).sort({ createdAt: -1 }).limit(300).toArray();
   res.json(await Promise.all(items.map(async (transaction) => {
     const vendor = transaction.vendorId ? await authDb.collection("user").findOne({ _id: { $in: idOptions(transaction.vendorId) } }, { projection: { name: 1, email: 1, businessName: 1 } }) : null;
     return { ...transaction, vendor: vendor || transaction.vendor };

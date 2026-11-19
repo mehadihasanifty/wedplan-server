@@ -66,7 +66,7 @@ export async function optionalUser(request, response, next) {
     const claims = verifyAccessToken(request);
     if (!claims) return next();
     const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(claims.sub) } });
-    if (!user || user.blocked === true) return response.status(403).json({ message: "This account cannot access protected features." });
+    if (!user || user.isBlocked === true || user.blocked === true) return response.status(403).json({ message: "This account cannot access protected features." });
     if ((Number(claims.ver) || 0) !== (Number(user.apiTokenVersion) || 0)) return response.status(401).json({ message: "Your API session has been revoked. Sign in again to continue." });
     request.user = { ...user, id: String(claims.sub), role: user.role || claims.role || "customer" };
     request.authClaims = claims;

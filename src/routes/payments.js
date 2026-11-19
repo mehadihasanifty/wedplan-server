@@ -11,7 +11,7 @@ const stripe = stripeSecret?.startsWith("sk_test_") ? new Stripe(stripeSecret) :
 const priceId = process.env.STRIPE_PREMIUM_PRICE_ID?.trim();
 
 paymentsRouter.get("/subscription", requireUser, requireRole("vendor"), asyncRoute(async (req, res) => {
-  const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1, plan: 1, stripeSubscriptionStatus: 1, cancelAtPeriodEnd: 1, currentPeriodEnd: 1 } });
+  const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1, subscriptionExpiresAt: 1, stripeSubscriptionStatus: 1, cancelAtPeriodEnd: 1 } });
   let price = null;
   if (stripe && priceId) {
     try {
@@ -23,13 +23,13 @@ paymentsRouter.get("/subscription", requireUser, requireRole("vendor"), asyncRou
       return res.status(503).json({ message: "The Premium Stripe price could not be loaded. Check STRIPE_PREMIUM_PRICE_ID." });
     }
   }
-  res.json({ plan: user?.subscriptionPlan || user?.plan || "free", status: user?.stripeSubscriptionStatus || "none", cancelAtPeriodEnd: user?.cancelAtPeriodEnd === true, currentPeriodEnd: user?.currentPeriodEnd || null, price });
+  res.json({ plan: user?.subscriptionPlan || "free", status: user?.stripeSubscriptionStatus || "none", cancelAtPeriodEnd: user?.cancelAtPeriodEnd === true, subscriptionExpiresAt: user?.subscriptionExpiresAt || null, price });
 }));
 
 paymentsRouter.post("/create-checkout-session", requireUser, requireRole("vendor"), asyncRoute(async (req, res) => {
   if (!stripe) return res.status(503).json({ message: "Stripe Test Mode is not configured. Set a server-side STRIPE_SECRET_KEY beginning with sk_test_." });
   if (!priceId) return res.status(503).json({ message: "The Premium Stripe Price ID is not configured on the server." });
-  if (/premium/i.test(String(req.user.subscriptionPlan || req.user.plan || "")) && req.user.stripeSubscriptionStatus === "active") {
+  if (/premium/i.test(String(req.user.subscriptionPlan || "")) && req.user.stripeSubscriptionStatus === "active") {
     return res.status(409).json({ message: "This vendor already has an active Premium subscription." });
   }
 
@@ -50,7 +50,7 @@ paymentsRouter.post("/create-checkout-session", requireUser, requireRole("vendor
 
   await db.collection("transactions").updateOne(
     { stripeSessionId: checkout.id },
-    { $setOnInsert: { vendorId: String(req.user.id), plan: "premium", planName: "Premium", amountCents: price.unit_amount, currency: price.currency, status: "pending", paymentStatus: "pending", stripeSessionId: checkout.id, createdAt: new Date() } },
+    { $setOnInsert: { vendorId: String(req.user.id), plan: "premium", amount: fromMinorUnits(price.unit_amount ?? 0, price.currency), currency: price.currency, status: "pending", stripeSessionId: checkout.id, createdAt: new Date() } },
     { upsert: true },
   );
   res.json({ url: checkout.url, sessionId: checkout.id });
@@ -66,10 +66,10 @@ paymentsRouter.get("/checkout-session/:id", requireUser, requireRole("vendor"), 
   }
   const transaction = await db.collection("transactions").findOne({ stripeSessionId: checkout.id, vendorId: String(req.user.id) });
   if (!transaction) return res.status(404).json({ message: "The checkout record could not be found." });
-  const vendor = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1, plan: 1 } });
-  const paymentStatus = transaction.paymentStatus === "paid" ? "paid" : transaction.paymentStatus === "failed" ? "failed" : transaction.paymentStatus === "expired" ? "expired" : "pending";
-  const confirmed = paymentStatus === "paid" && /premium/i.test(String(vendor?.subscriptionPlan || vendor?.plan || ""));
-  res.json({ confirmed, paymentStatus, subscriptionPlan: vendor?.subscriptionPlan || vendor?.plan || "free", message: confirmed ? "Stripe confirmed your Premium subscription." : "Waiting for Stripe to verify the payment." });
+  const vendor = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1 } });
+  const paymentStatus = transaction.status === "succeeded" ? "paid" : ["failed", "expired"].includes(transaction.status) ? transaction.status : "pending";
+  const confirmed = paymentStatus === "paid" && /premium/i.test(String(vendor?.subscriptionPlan || ""));
+  res.json({ confirmed, paymentStatus, subscriptionPlan: vendor?.subscriptionPlan || "free", message: confirmed ? "Stripe confirmed your Premium subscription." : "Waiting for Stripe to verify the payment." });
 }));
 
 paymentsRouter.post("/create-portal-session", requireUser, requireRole("vendor"), asyncRoute(async (req, res) => {
@@ -94,11 +94,11 @@ export async function handleStripeWebhook(req, res) {
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const paid = event.type === "checkout.session.async_payment_succeeded" || ["paid", "no_payment_required"].includes(data.payment_status);
     if (paid && data.mode === "subscription") await markCheckoutPaid(data);
-    else if (!paid) await db.collection("transactions").updateOne({ stripeSessionId: data.id }, { $set: { status: "pending", paymentStatus: "pending", updatedAt: new Date() } });
+    else if (!paid) await db.collection("transactions").updateOne({ stripeSessionId: data.id }, { $set: { status: "pending" } });
   } else if (event.type === "checkout.session.expired") {
-    await db.collection("transactions").updateOne({ stripeSessionId: data.id }, { $set: { status: "expired", paymentStatus: "expired", updatedAt: new Date() } });
+    await db.collection("transactions").updateOne({ stripeSessionId: data.id }, { $set: { status: "expired" } });
   } else if (event.type === "checkout.session.async_payment_failed") {
-    await db.collection("transactions").updateOne({ stripeSessionId: data.id }, { $set: { status: "failed", paymentStatus: "failed", updatedAt: new Date() } });
+    await db.collection("transactions").updateOne({ stripeSessionId: data.id }, { $set: { status: "failed" } });
   } else if (["customer.subscription.created", "customer.subscription.updated", "customer.subscription.deleted", "customer.subscription.paused", "customer.subscription.resumed"].includes(event.type)) {
     await syncSubscription(data, event.type);
   } else if (["invoice.paid", "invoice.payment_succeeded", "invoice.payment_failed"].includes(event.type)) {
@@ -110,15 +110,18 @@ export async function handleStripeWebhook(req, res) {
 async function markCheckoutPaid(checkout) {
   const vendorId = checkout.metadata?.vendorId || checkout.client_reference_id;
   if (!vendorId) return;
-  const paymentUpdate = { vendorId, plan: "premium", planName: "Premium", status: "succeeded", paymentStatus: "paid", stripeSubscriptionId: stripeId(checkout.subscription) || null, confirmedAt: new Date(), updatedAt: new Date() };
-  if (typeof checkout.amount_total === "number") paymentUpdate.amountCents = checkout.amount_total;
+  const subscriptionId = stripeId(checkout.subscription);
+  const subscription = subscriptionId ? await stripe.subscriptions.retrieve(subscriptionId) : null;
+  const periodEnd = subscription?.current_period_end || subscription?.items?.data?.[0]?.current_period_end;
+  const paymentUpdate = { vendorId, plan: "premium", status: "succeeded", stripeSubscriptionId: subscriptionId || null };
+  if (typeof checkout.amount_total === "number") paymentUpdate.amount = fromMinorUnits(checkout.amount_total, checkout.currency || "USD");
   if (typeof checkout.currency === "string") paymentUpdate.currency = checkout.currency;
   await db.collection("transactions").updateOne(
     { stripeSessionId: checkout.id },
     { $set: paymentUpdate, $setOnInsert: { createdAt: new Date() } },
     { upsert: true },
   );
-  await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", plan: "premium", stripeCustomerId: stripeId(checkout.customer), stripeSubscriptionId: stripeId(checkout.subscription), stripeSubscriptionStatus: "active", cancelAtPeriodEnd: false, updatedAt: new Date() } });
+  await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", subscriptionExpiresAt: periodEnd ? new Date(periodEnd * 1000) : null, stripeCustomerId: stripeId(checkout.customer), stripeSubscriptionId: subscriptionId, stripeSubscriptionStatus: subscription?.status || "active", cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end), updatedAt: new Date() } });
 }
 
 async function syncSubscription(subscription, eventType) {
@@ -128,12 +131,11 @@ async function syncSubscription(subscription, eventType) {
   const periodEnd = subscription.current_period_end || subscription.items?.data?.[0]?.current_period_end;
   await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: {
     subscriptionPlan: active ? "premium" : "free",
-    plan: active ? "premium" : "free",
     stripeCustomerId: stripeId(subscription.customer),
     stripeSubscriptionId: subscription.id,
     stripeSubscriptionStatus: eventType === "customer.subscription.deleted" ? "canceled" : subscription.status,
     cancelAtPeriodEnd: Boolean(subscription.cancel_at_period_end),
-    currentPeriodEnd: periodEnd ? new Date(periodEnd * 1000) : null,
+    subscriptionExpiresAt: periodEnd ? new Date(periodEnd * 1000) : null,
     updatedAt: new Date(),
   } });
 }
@@ -148,11 +150,12 @@ async function recordInvoice(invoice, eventType) {
   const paid = eventType !== "invoice.payment_failed";
   await db.collection("transactions").updateOne(
     { stripeInvoiceId: invoice.id },
-    { $set: { vendorId, plan: "premium", planName: "Premium", amountCents: paid ? invoice.amount_paid : invoice.amount_due, currency: invoice.currency, status: paid ? "succeeded" : "failed", paymentStatus: paid ? "paid" : "failed", stripeInvoiceId: invoice.id, stripeSubscriptionId: subscriptionId, transactionDate: invoice.status_transitions?.paid_at ? new Date(invoice.status_transitions.paid_at * 1000) : new Date(), updatedAt: new Date() }, $setOnInsert: { createdAt: new Date() } },
+    { $set: { vendorId, plan: "premium", amount: fromMinorUnits(paid ? invoice.amount_paid : invoice.amount_due, invoice.currency), currency: invoice.currency, status: paid ? "succeeded" : "failed", stripeInvoiceId: invoice.id, stripeSubscriptionId: subscriptionId }, $setOnInsert: { createdAt: invoice.status_transitions?.paid_at ? new Date(invoice.status_transitions.paid_at * 1000) : new Date((invoice.created || Date.now() / 1000) * 1000) } },
     { upsert: true },
   );
   if (paid && ["active", "trialing"].includes(subscription.status)) {
-    await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", plan: "premium", stripeSubscriptionStatus: subscription.status, stripeCustomerId: stripeId(invoice.customer), stripeSubscriptionId: subscriptionId, updatedAt: new Date() } });
+    const periodEnd = subscription.current_period_end || subscription.items?.data?.[0]?.current_period_end;
+    await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", subscriptionExpiresAt: periodEnd ? new Date(periodEnd * 1000) : null, stripeSubscriptionStatus: subscription.status, stripeCustomerId: stripeId(invoice.customer), stripeSubscriptionId: subscriptionId, updatedAt: new Date() } });
   }
 }
 
@@ -161,6 +164,12 @@ async function resolveVendorId(metadataVendorId, customerId) {
   if (!customerId) return "";
   const user = await authDb.collection("user").findOne({ stripeCustomerId: customerId }, { projection: { _id: 1 } });
   return user ? String(user._id) : "";
+}
+
+function fromMinorUnits(amount, currency) {
+  const code = String(currency || "USD").toUpperCase();
+  const digits = new Intl.NumberFormat("en", { style: "currency", currency: code }).resolvedOptions().maximumFractionDigits;
+  return Number((Number(amount || 0) / (10 ** digits)).toFixed(digits));
 }
 
 function stripeId(value) {

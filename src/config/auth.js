@@ -20,15 +20,17 @@ export const auth = betterAuth({
   },
   user: { additionalFields: {
     role: { type: "string", required: false, defaultValue: "customer", input: true },
-    blocked: { type: "boolean", required: false, defaultValue: false, input: false },
+    businessName: { type: "string", required: false, input: true },
+    isBlocked: { type: "boolean", required: false, defaultValue: false, input: false },
     subscriptionPlan: { type: "string", required: false, defaultValue: "free", input: false },
+    subscriptionExpiresAt: { type: "date", required: false, input: false },
     phoneNumber: { type: "string", required: false, input: false },
     location: { type: "string", required: false, input: false },
     bio: { type: "string", required: false, input: false },
   } },
   databaseHooks: { user: {
     update: { before: async (user) => {
-      if ("role" in user || "subscriptionPlan" in user || "blocked" in user) {
+      if ("role" in user || "subscriptionPlan" in user || "subscriptionExpiresAt" in user || "isBlocked" in user || "blocked" in user) {
         throw new APIError("FORBIDDEN", { message: "Account role, access, and subscription settings cannot be changed from profile updates." });
       }
       return { data: user };
