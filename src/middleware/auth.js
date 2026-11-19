@@ -1,5 +1,5 @@
 import jwt from "jsonwebtoken";
-import { db } from "../config/database.js";
+import { authDb } from "../config/database.js";
 import { idOptions } from "../utils/ids.js";
 
 const jwtSecret = process.env.JWT_SECRET?.trim();
@@ -61,7 +61,7 @@ export async function optionalUser(request, response, next) {
   try {
     const claims = verifyAccessToken(request);
     if (!claims) return next();
-    const user = await db.collection("user").findOne({ _id: { $in: idOptions(claims.sub) } });
+    const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(claims.sub) } });
     if (!user || user.blocked === true) return response.status(403).json({ message: "This account cannot access protected features." });
     if ((Number(claims.ver) || 0) !== (Number(user.apiTokenVersion) || 0)) return response.status(401).json({ message: "Your API session has been revoked. Sign in again to continue." });
     request.user = { ...user, id: String(claims.sub), role: user.role || claims.role || "customer" };

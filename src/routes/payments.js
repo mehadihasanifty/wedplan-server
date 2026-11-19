@@ -1,6 +1,6 @@
 import { Router } from "express";
 import Stripe from "stripe";
-import { db } from "../config/database.js";
+import { authDb, db } from "../config/database.js";
 import { requireRole, requireUser } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { idOptions } from "../utils/ids.js";
@@ -11,7 +11,7 @@ const stripe = stripeSecret?.startsWith("sk_test_") ? new Stripe(stripeSecret) :
 const priceId = process.env.STRIPE_PREMIUM_PRICE_ID?.trim();
 
 paymentsRouter.get("/subscription", requireUser, requireRole("vendor"), asyncRoute(async (req, res) => {
-  const user = await db.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1, plan: 1, stripeSubscriptionStatus: 1, cancelAtPeriodEnd: 1, currentPeriodEnd: 1 } });
+  const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1, plan: 1, stripeSubscriptionStatus: 1, cancelAtPeriodEnd: 1, currentPeriodEnd: 1 } });
   let price = null;
   if (stripe && priceId) {
     try {
@@ -66,7 +66,7 @@ paymentsRouter.get("/checkout-session/:id", requireUser, requireRole("vendor"), 
   }
   const transaction = await db.collection("transactions").findOne({ stripeSessionId: checkout.id, vendorId: String(req.user.id) });
   if (!transaction) return res.status(404).json({ message: "The checkout record could not be found." });
-  const vendor = await db.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1, plan: 1 } });
+  const vendor = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1, plan: 1 } });
   const paymentStatus = transaction.paymentStatus === "paid" ? "paid" : transaction.paymentStatus === "failed" ? "failed" : transaction.paymentStatus === "expired" ? "expired" : "pending";
   const confirmed = paymentStatus === "paid" && /premium/i.test(String(vendor?.subscriptionPlan || vendor?.plan || ""));
   res.json({ confirmed, paymentStatus, subscriptionPlan: vendor?.subscriptionPlan || vendor?.plan || "free", message: confirmed ? "Stripe confirmed your Premium subscription." : "Waiting for Stripe to verify the payment." });
@@ -74,7 +74,7 @@ paymentsRouter.get("/checkout-session/:id", requireUser, requireRole("vendor"), 
 
 paymentsRouter.post("/create-portal-session", requireUser, requireRole("vendor"), asyncRoute(async (req, res) => {
   if (!stripe) return res.status(503).json({ message: "Stripe Test Mode is not configured." });
-  const user = await db.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { stripeCustomerId: 1 } });
+  const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { stripeCustomerId: 1 } });
   if (!user?.stripeCustomerId) return res.status(409).json({ message: "No Stripe billing profile is linked to this vendor yet." });
   const base = (process.env.CLIENT_URL || "http://localhost:3000").split(",")[0].trim().replace(/\/$/, "");
   const portal = await stripe.billingPortal.sessions.create({ customer: user.stripeCustomerId, return_url: `${base}/dashboard/vendor/subscription` });
@@ -118,7 +118,7 @@ async function markCheckoutPaid(checkout) {
     { $set: paymentUpdate, $setOnInsert: { createdAt: new Date() } },
     { upsert: true },
   );
-  await db.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", plan: "premium", stripeCustomerId: stripeId(checkout.customer), stripeSubscriptionId: stripeId(checkout.subscription), stripeSubscriptionStatus: "active", cancelAtPeriodEnd: false, updatedAt: new Date() } });
+  await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", plan: "premium", stripeCustomerId: stripeId(checkout.customer), stripeSubscriptionId: stripeId(checkout.subscription), stripeSubscriptionStatus: "active", cancelAtPeriodEnd: false, updatedAt: new Date() } });
 }
 
 async function syncSubscription(subscription, eventType) {
@@ -126,7 +126,7 @@ async function syncSubscription(subscription, eventType) {
   if (!vendorId) return;
   const active = ["active", "trialing"].includes(subscription.status);
   const periodEnd = subscription.current_period_end || subscription.items?.data?.[0]?.current_period_end;
-  await db.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: {
+  await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: {
     subscriptionPlan: active ? "premium" : "free",
     plan: active ? "premium" : "free",
     stripeCustomerId: stripeId(subscription.customer),
@@ -152,14 +152,14 @@ async function recordInvoice(invoice, eventType) {
     { upsert: true },
   );
   if (paid && ["active", "trialing"].includes(subscription.status)) {
-    await db.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", plan: "premium", stripeSubscriptionStatus: subscription.status, stripeCustomerId: stripeId(invoice.customer), stripeSubscriptionId: subscriptionId, updatedAt: new Date() } });
+    await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", plan: "premium", stripeSubscriptionStatus: subscription.status, stripeCustomerId: stripeId(invoice.customer), stripeSubscriptionId: subscriptionId, updatedAt: new Date() } });
   }
 }
 
 async function resolveVendorId(metadataVendorId, customerId) {
   if (metadataVendorId) return String(metadataVendorId);
   if (!customerId) return "";
-  const user = await db.collection("user").findOne({ stripeCustomerId: customerId }, { projection: { _id: 1 } });
+  const user = await authDb.collection("user").findOne({ stripeCustomerId: customerId }, { projection: { _id: 1 } });
   return user ? String(user._id) : "";
 }
 

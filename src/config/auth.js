@@ -1,7 +1,7 @@
 import { betterAuth } from "better-auth";
 import { APIError } from "better-auth/api";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
-import { db, mongoClient } from "./database.js";
+import { authDb, mongoClient } from "./database.js";
 
 if (!process.env.BETTER_AUTH_SECRET?.trim()) {
   throw new Error("BETTER_AUTH_SECRET must match the WedPlan client secret so API requests can verify sessions.");
@@ -11,8 +11,13 @@ export const auth = betterAuth({
   appName: "WedPlan",
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
   secret: process.env.BETTER_AUTH_SECRET,
-  database: mongodbAdapter(db, { client: mongoClient }),
-  emailAndPassword: { enabled: true, requireEmailVerification: false },
+  database: mongodbAdapter(authDb, { client: mongoClient }),
+  emailAndPassword: {
+    enabled: true,
+    requireEmailVerification: false,
+    // Match the client signup validation (6 characters plus upper/lowercase).
+    minPasswordLength: 6,
+  },
   user: { additionalFields: {
     role: { type: "string", required: false, defaultValue: "customer", input: true },
     blocked: { type: "boolean", required: false, defaultValue: false, input: false },

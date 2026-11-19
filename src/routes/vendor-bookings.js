@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db } from "../config/database.js";
+import { authDb, db } from "../config/database.js";
 import { requireRole, requireUser } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { idOptions } from "../utils/ids.js";
@@ -12,7 +12,7 @@ vendorBookingsRouter.get("/", asyncRoute(async (req, res) => {
   const enriched = await Promise.all(list.map(async (booking) => {
     const [service, customer] = await Promise.all([
       db.collection("services").findOne({ _id: { $in: idOptions(booking.serviceId) } }),
-      db.collection("user").findOne({ _id: { $in: idOptions(booking.customerId) } }, { projection: { name: 1, email: 1, image: 1 } }),
+      authDb.collection("user").findOne({ _id: { $in: idOptions(booking.customerId) } }, { projection: { name: 1, email: 1, image: 1 } }),
     ]);
     return { ...booking, service: service || booking.service, customer: customer || booking.customer };
   }));

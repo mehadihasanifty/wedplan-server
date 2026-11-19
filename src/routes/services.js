@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { db } from "../config/database.js";
+import { authDb, db } from "../config/database.js";
 import { optionalUser, requireRole, requireUser } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { escapeRegex, idOptions } from "../utils/ids.js";
 
 export const servicesRouter = Router();
 const services = () => db.collection("services");
-const users = () => db.collection("user");
+const users = () => authDb.collection("user");
 
 servicesRouter.get("/", optionalUser, asyncRoute(async (req, res) => {
   const { search = "", category, location, sort = "", page = "1", limit = "100" } = req.query;

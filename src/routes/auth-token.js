@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { auth } from "../config/auth.js";
-import { db } from "../config/database.js";
+import { authDb } from "../config/database.js";
 import { clearAccessTokenCookie, issueAccessToken, setAccessTokenCookie, verifyAccessToken } from "../middleware/auth.js";
 import { idOptions } from "../utils/ids.js";
 
@@ -23,7 +23,7 @@ authTokenRouter.post("/token", async (request, response, next) => {
       return response.status(401).json({ message: "Sign in to establish an API session." });
     }
 
-    const user = await db.collection("user").findOne({ _id: { $in: idOptions(session.user.id) } });
+    const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(session.user.id) } });
     if (!user || user.blocked === true) {
       clearAccessTokenCookie(response);
       return response.status(403).json({ message: "This account cannot access protected features." });
@@ -40,7 +40,7 @@ authTokenRouter.post("/token", async (request, response, next) => {
 authTokenRouter.delete("/token", async (request, response, next) => {
   try {
     const claims = verifyAccessToken(request);
-    if (claims?.sub) await db.collection("user").updateOne({ _id: { $in: idOptions(claims.sub) } }, { $inc: { apiTokenVersion: 1 } });
+    if (claims?.sub) await authDb.collection("user").updateOne({ _id: { $in: idOptions(claims.sub) } }, { $inc: { apiTokenVersion: 1 } });
   } catch (error) { return next(error); }
   clearAccessTokenCookie(response);
   response.set("Cache-Control", "no-store");

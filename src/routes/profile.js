@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { db } from "../config/database.js";
+import { authDb } from "../config/database.js";
 import { requireRole, requireUser } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { idOptions } from "../utils/ids.js";
@@ -31,7 +31,7 @@ profileRouter.patch("/", requireUser, requireRole("vendor", "customer"), asyncRo
   if (!Object.keys(update).length) return res.status(400).json({ message: "No editable profile fields were provided." });
   update.updatedAt = new Date();
 
-  const user = await db.collection("user").findOneAndUpdate(
+  const user = await authDb.collection("user").findOneAndUpdate(
     { _id: { $in: idOptions(req.user.id) } },
     { $set: update },
     { returnDocument: "after", projection: { name: 1, email: 1, image: 1, role: 1, phoneNumber: 1, location: 1, bio: 1, subscriptionPlan: 1, plan: 1 } },

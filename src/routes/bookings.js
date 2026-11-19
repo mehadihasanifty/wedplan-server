@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { ObjectId } from "mongodb";
-import { db } from "../config/database.js";
+import { authDb, db } from "../config/database.js";
 import { requireRole, requireUser } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { idOptions } from "../utils/ids.js";
@@ -49,8 +49,8 @@ bookingsRouter.post("/", requireUser, requireRole("customer"), asyncRoute(async 
   }
 
   const [customer, vendor] = await Promise.all([
-    db.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { name: 1, email: 1, image: 1 } }),
-    db.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }, { projection: { name: 1, email: 1, image: 1, businessName: 1 } }),
+    authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { name: 1, email: 1, image: 1 } }),
+    authDb.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }, { projection: { name: 1, email: 1, image: 1, businessName: 1 } }),
   ]);
   const bookingId = new ObjectId();
   const booking = { _id: bookingId, serviceId: canonicalServiceId, vendorId, customerId: String(req.user.id), eventDate, eventLocation, ...(message ? { message } : {}), status: "pending", createdAt: new Date(), updatedAt: new Date(), service: { ...service, vendor }, customer, vendor };
@@ -84,8 +84,8 @@ bookingsRouter.patch("/:id", requireUser, asyncRoute(async (req, res) => {
 
 async function enrichBooking(booking) {
   const service = booking.serviceId ? await db.collection("services").findOne({ _id: { $in: idOptions(booking.serviceId) } }) : null;
-  const customer = booking.customerId ? await db.collection("user").findOne({ _id: { $in: idOptions(booking.customerId) } }, { projection: { name: 1, email: 1, image: 1 } }) : null;
+  const customer = booking.customerId ? await authDb.collection("user").findOne({ _id: { $in: idOptions(booking.customerId) } }, { projection: { name: 1, email: 1, image: 1 } }) : null;
   const vendorId = booking.vendorId || service?.vendorId;
-  const vendor = vendorId ? await db.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }, { projection: { name: 1, email: 1, image: 1, businessName: 1 } }) : null;
+  const vendor = vendorId ? await authDb.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }, { projection: { name: 1, email: 1, image: 1, businessName: 1 } }) : null;
   return { ...booking, service: service ? { ...service, vendor } : booking.service, customer: customer || booking.customer, vendor: vendor || booking.vendor };
 }
