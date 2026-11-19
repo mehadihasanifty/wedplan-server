@@ -37,6 +37,43 @@ adminRouter.patch("/users/:id", asyncRoute(async (req, res) => {
   res.json(user);
 }));
 
+adminRouter.delete("/users/:id", asyncRoute(async (req, res) => {
+  const targetId = String(req.params.id || "").trim();
+  if (!targetId) return res.status(400).json({ message: "A user ID is required." });
+  if (String(req.user.id) === targetId) return res.status(400).json({ message: "You cannot delete your own admin account." });
+
+  const userCollection = authDb.collection("user");
+  const user = await userCollection.findOne({ _id: { $in: idOptions(targetId) } });
+  if (!user) return res.status(404).json({ message: "User not found." });
+  if (!(["vendor", "customer"].includes(String(user.role)))) {
+    return res.status(403).json({ message: "Admin accounts cannot be deleted from user management." });
+  }
+
+  // A vendor's listings must immediately stop appearing in public results.
+  if (user.role === "vendor") {
+    await db.collection("services").updateMany(
+      { vendorId: { $in: idOptions(targetId) } },
+      { $set: { status: "rejected", isActive: false, updatedAt: new Date() } },
+    );
+  }
+
+  const result = await userCollection.deleteOne({ _id: user._id });
+  if (!result.deletedCount) return res.status(404).json({ message: "User was already deleted." });
+
+  // Remove Better Auth credentials and sessions so the deleted account cannot
+  // establish another session. Missing user records also invalidate API JWTs.
+  const userId = String(user._id);
+  const authCleanup = await Promise.allSettled([
+    authDb.collection("session").deleteMany({ userId }),
+    authDb.collection("account").deleteMany({ userId }),
+  ]);
+  if (authCleanup.some((item) => item.status === "rejected")) {
+    console.error("WedPlan removed an admin-selected user but could not clean up every authentication record.");
+  }
+
+  res.json({ message: "User deleted. Existing sessions are no longer authorized." });
+}));
+
 adminRouter.get("/services", asyncRoute(async (req, res) => {
   const status = String(req.query.status || "all");
   const search = String(req.query.search || "").trim().slice(0, 100);
