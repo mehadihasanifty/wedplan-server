@@ -50,7 +50,7 @@ servicesRouter.post("/", requireUser, requireRole("vendor"), asyncRoute(async (r
     const activeCount = await services().countDocuments({ vendorId: { $in: idOptions(vendorId) }, isActive: true, status: "approved" });
     if (activeCount >= 3) return res.status(403).json({ message: "The free plan allows up to 3 active services. Upgrade to Premium to add more." });
   }
-  const document = { ...input.value, vendorId, status: "pending", isActive: true, createdAt: new Date(), updatedAt: new Date() };
+  const document = { ...input.value, vendorId, status: "pending", isActive: input.value.isActive !== false, createdAt: new Date(), updatedAt: new Date() };
   const result = await services().insertOne(document);
   res.status(201).json({ ...document, _id: result.insertedId });
 }));
@@ -58,9 +58,12 @@ servicesRouter.post("/", requireUser, requireRole("vendor"), asyncRoute(async (r
 servicesRouter.patch("/:id", requireUser, requireRole("vendor"), asyncRoute(async (req, res) => {
   const input = validateService(req.body, false);
   if (input.error) return res.status(400).json({ message: input.error });
+  const requiresReview = Object.keys(input.value).some((field) => field !== "isActive");
+  const update = { ...input.value, updatedAt: new Date() };
+  if (requiresReview) update.status = "pending";
   const result = await services().findOneAndUpdate(
     { _id: { $in: idOptions(req.params.id) }, vendorId: { $in: idOptions(req.user.id) } },
-    { $set: { ...input.value, status: "pending", updatedAt: new Date() } }, { returnDocument: "after" },
+    { $set: update }, { returnDocument: "after" },
   );
   if (!result) return res.status(404).json({ message: "Service not found or not owned by your account." });
   res.json(result);
@@ -96,9 +99,25 @@ function validateService(body = {}, creating) {
   if (location) value.location = location.slice(0, 200);
   if (body.price !== undefined && Number.isFinite(price) && price >= 0) value.price = price;
   else if (body.price !== undefined) return { error: "Price must be a non-negative number." };
-  if (body.images !== undefined) value.images = images;
+  if (body.images !== undefined) {
+    if (!Array.isArray(body.images) || images.length !== body.images.length || images.some((image) => !isAllowedImageUrl(image))) {
+      return { error: "Service images must be valid HTTPS image URLs." };
+    }
+    value.images = images;
+  }
   if (body.currency) value.currency = String(body.currency).slice(0, 5);
-  if (body.isActive !== undefined) value.isActive = Boolean(body.isActive);
+  if (body.isActive !== undefined) {
+    if (typeof body.isActive !== "boolean") return { error: "Service availability must be true or false." };
+    value.isActive = body.isActive;
+  }
   if (!creating && Object.keys(value).length === 0) return { error: "Provide at least one valid service field to update." };
   return { value };
+}
+
+function isAllowedImageUrl(value) {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
 }

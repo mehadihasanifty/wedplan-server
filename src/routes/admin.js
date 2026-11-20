@@ -107,7 +107,10 @@ adminRouter.patch("/services/:id", asyncRoute(async (req, res) => {
     }
     update.status = req.body.status;
   }
-  if (req.body?.isActive !== undefined) update.isActive = Boolean(req.body.isActive);
+  if (req.body?.isActive !== undefined) {
+    if (typeof req.body.isActive !== "boolean") return res.status(400).json({ message: "Service availability must be true or false." });
+    update.isActive = req.body.isActive;
+  }
   if (Object.keys(update).length === 1) return res.status(400).json({ message: "Provide a service status or availability change." });
   const service = await db.collection("services").findOneAndUpdate({ _id: { $in: idOptions(req.params.id) } }, { $set: update }, { returnDocument: "after" });
   if (!service) return res.status(404).json({ message: "Service not found." });
