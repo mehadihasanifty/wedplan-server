@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import { authDb } from "../config/database.js";
 import { idOptions } from "../utils/ids.js";
+import { getAllowedClientOrigins } from "../utils/origins.js";
 
 const jwtSecret = process.env.JWT_SECRET?.trim();
 if (!jwtSecret || Buffer.byteLength(jwtSecret) < 32) {
@@ -79,7 +80,7 @@ export function requireUser(request, response, next) {
     if (error) return next(error);
     if (!request.user) return response.status(401).json({ message: "Sign in again to continue. Your API session may have expired." });
     if (request.get("origin")) {
-      const allowed = (process.env.CLIENT_URL || "http://localhost:3000").split(",").map((item) => item.trim());
+      const allowed = getAllowedClientOrigins();
       if (!allowed.includes(request.get("origin"))) return response.status(403).json({ message: "This request origin is not allowed." });
     }
     response.set("Cache-Control", "no-store");

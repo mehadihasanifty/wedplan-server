@@ -3,10 +3,11 @@ import cors from "cors";
 import "dotenv/config";
 import { connectDatabase } from "./config/database.js";
 import { MongoClient } from 'mongodb';
+import { getAllowedClientOrigins } from "./utils/origins.js";
 
 const app = express();
 const port = Number(process.env.PORT) || 5000;
-const allowedOrigins = (process.env.CLIENT_URL || "http://localhost:3000").split(",").map((origin) => origin.trim()).filter(Boolean);
+const allowedOrigins = getAllowedClientOrigins();
 
 app.use(cors({
   origin(origin, callback) {

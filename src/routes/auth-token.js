@@ -3,13 +3,14 @@ import { auth } from "../config/auth.js";
 import { authDb } from "../config/database.js";
 import { clearAccessTokenCookie, issueAccessToken, setAccessTokenCookie, verifyAccessToken } from "../middleware/auth.js";
 import { idOptions } from "../utils/ids.js";
+import { getAllowedClientOrigins } from "../utils/origins.js";
 
 export const authTokenRouter = Router();
 
 authTokenRouter.post("/token", async (request, response, next) => {
   try {
     const origin = request.get("origin");
-    const allowed = (process.env.CLIENT_URL || "http://localhost:3000").split(",").map((item) => item.trim());
+    const allowed = getAllowedClientOrigins();
     if (origin && !allowed.includes(origin)) return response.status(403).json({ message: "This request origin is not allowed." });
 
     const headers = new Headers();

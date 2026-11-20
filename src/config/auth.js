@@ -3,6 +3,19 @@ import { APIError } from "better-auth/api";
 import { mongodbAdapter } from "@better-auth/mongo-adapter";
 import { authDb, mongoClient } from "./database.js";
 
+const trustedOrigins = [
+  process.env.CLIENT_URL,
+  process.env.BETTER_AUTH_URL,
+  process.env.BETTER_AUTH_TRUSTED_ORIGINS,
+]
+  .filter(Boolean)
+  .flatMap((value) => String(value).split(","))
+  .map((value) => {
+    try { return new URL(value.trim()).origin; }
+    catch { return ""; }
+  })
+  .filter(Boolean);
+
 if (!process.env.BETTER_AUTH_SECRET?.trim()) {
   throw new Error("BETTER_AUTH_SECRET must match the WedPlan client secret so API requests can verify sessions.");
 }
@@ -10,6 +23,7 @@ if (!process.env.BETTER_AUTH_SECRET?.trim()) {
 export const auth = betterAuth({
   appName: "WedPlan",
   baseURL: process.env.BETTER_AUTH_URL || "http://localhost:3000",
+  trustedOrigins: [...new Set(trustedOrigins)],
   secret: process.env.BETTER_AUTH_SECRET,
   database: mongodbAdapter(authDb, { client: mongoClient }),
   emailAndPassword: {
