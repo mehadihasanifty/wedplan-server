@@ -83,11 +83,12 @@ paymentsRouter.post("/create-portal-session", requireUser, requireRole("vendor")
 
 export async function handleStripeWebhook(req, res) {
   if (!stripe) return res.status(503).send("Stripe Test Mode is not configured.");
-  if (!process.env.STRIPE_WEBHOOK_SECRET?.trim()) return res.status(503).send("Stripe webhook signing secret is not configured.");
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET?.trim();
+  if (!webhookSecret) return res.status(503).send("Stripe webhook signing secret is not configured.");
   let event;
   const signature = req.get("stripe-signature");
   if (!signature) return res.status(400).send("Stripe signature header is missing.");
-  try { event = stripe.webhooks.constructEvent(req.body, signature, process.env.STRIPE_WEBHOOK_SECRET); }
+  try { event = stripe.webhooks.constructEvent(req.body, signature, webhookSecret); }
   catch (error) { return res.status(400).send(`Webhook signature verification failed: ${error.message}`); }
 
   const data = event.data.object;

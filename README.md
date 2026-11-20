@@ -34,6 +34,10 @@ Node.js, Express 5, MongoDB, Better Auth, JSON Web Tokens, Stripe, and ImgBB (up
 
 The API listens on `http://localhost:5000` by default. Health check: `GET /api/health`.
 
+## Deploy the API to Vercel
+
+Keep the Vercel project Root Directory set to this server repository root. The root `vercel.json` pins the Express framework and clears any dashboard Next.js build-command override; Vercel detects `index.js` as the Express entry point. Do not set the project Framework Preset to Next.js or a custom `next build` command. Add the server environment variables from `.env.example` in Vercel Project Settings before redeploying.
+
 ## Environment variables
 
 | Variable | Purpose |
@@ -62,7 +66,9 @@ The API listens on `http://localhost:5000` by default. Health check: `GET /api/h
 
 ## Stripe Test Mode
 
-Configure the webhook endpoint as `https://<server-host>/api/payments/webhook` (locally: `http://localhost:5000/api/payments/webhook`) and provide its signing secret as `STRIPE_WEBHOOK_SECRET`. Subscribe to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.paused`, `customer.subscription.resumed`, `invoice.paid`, `invoice.payment_succeeded`, and `invoice.payment_failed`. Enable Stripe Customer Portal in Test Mode for subscription management.
+Create an active recurring Premium Price in Stripe Test Mode and copy its `price_...` ID to `STRIPE_PREMIUM_PRICE_ID`. Put the `sk_test_...` key only in the server `.env`; the app intentionally rejects live keys in this assignment flow. For local webhook testing, run `stripe listen --forward-to localhost:5000/api/payments/webhook`, then copy the CLI's `whsec_...` value into `STRIPE_WEBHOOK_SECRET` and restart the API. In Stripe Dashboard, register `https://<server-host>/api/payments/webhook` for deployment (locally use the CLI forwarder) and subscribe to `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `checkout.session.async_payment_failed`, `checkout.session.expired`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `customer.subscription.paused`, `customer.subscription.resumed`, `invoice.paid`, `invoice.payment_succeeded`, and `invoice.payment_failed`. Enable Stripe Customer Portal in Test Mode for subscription management.
+
+Only vendors can create Premium Checkout Sessions. Transactions begin as `pending`; Premium access is updated from Stripe-signed webhook events, never from the browser return URL. The customer booking workflow in Assignment 9 does not charge customers; Stripe is used for vendor Premium subscriptions only.
 
 ## Security and production setup
 
