@@ -3,6 +3,7 @@ import { authDb, db } from "../config/database.js";
 import { requireAdmin, requireUser } from "../middleware/auth.js";
 import { asyncRoute } from "../utils/async-route.js";
 import { escapeRegex, idOptions } from "../utils/ids.js";
+import { reconcilePendingTransactions } from "./payments.js";
 
 export const adminRouter = Router();
 adminRouter.use(requireUser, requireAdmin);
@@ -129,4 +130,12 @@ adminRouter.get("/transactions", asyncRoute(async (_req, res) => {
     const vendor = transaction.vendorId ? await authDb.collection("user").findOne({ _id: { $in: idOptions(transaction.vendorId) } }, { projection: { name: 1, email: 1, businessName: 1 } }) : null;
     return { ...transaction, vendor: vendor || transaction.vendor };
   })));
+}));
+
+adminRouter.post("/transactions/reconcile", asyncRoute(async (_req, res) => {
+  try {
+    res.set("Cache-Control", "no-store").json(await reconcilePendingTransactions());
+  } catch (error) {
+    res.status(503).json({ message: error instanceof Error ? error.message : "Could not verify pending Stripe transactions." });
+  }
 }));

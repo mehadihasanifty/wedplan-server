@@ -86,13 +86,55 @@ paymentsRouter.get("/checkout-session/:id", requireUser, requireRole("vendor"), 
   if (checkout.metadata?.vendorId !== String(req.user.id) || checkout.mode !== "subscription") {
     return res.status(404).json({ message: "Checkout session not found." });
   }
-  const transaction = await db.collection("transactions").findOne({ stripeSessionId: checkout.id, vendorId: String(req.user.id) });
+  let transaction = await db.collection("transactions").findOne({ stripeSessionId: checkout.id, vendorId: String(req.user.id) });
   if (!transaction) return res.status(404).json({ message: "The checkout record could not be found." });
+  if (transaction.status === "pending" && checkout.mode === "subscription" && checkout.status === "complete" && ["paid", "no_payment_required"].includes(checkout.payment_status)) {
+    await markCheckoutPaid(checkout);
+    transaction = await db.collection("transactions").findOne({ stripeSessionId: checkout.id, vendorId: String(req.user.id) });
+  }
   const vendor = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1 } });
   const paymentStatus = transaction.status === "succeeded" ? "paid" : ["failed", "expired"].includes(transaction.status) ? transaction.status : "pending";
   const confirmed = paymentStatus === "paid" && /premium/i.test(String(vendor?.subscriptionPlan || ""));
   res.json({ confirmed, paymentStatus, subscriptionPlan: vendor?.subscriptionPlan || "free", message: confirmed ? "Stripe confirmed your Premium subscription." : "Waiting for Stripe to verify the payment." });
 }));
+
+export async function reconcilePendingTransactions() {
+  if (!stripe) throw new Error("Stripe Test Mode is not configured.");
+  const pending = await db.collection("transactions")
+    .find({ status: "pending", stripeSessionId: { $type: "string" } })
+    .sort({ createdAt: 1 })
+    .limit(50)
+    .toArray();
+  const summary = { checked: pending.length, confirmed: 0, expired: 0, stillPending: 0, unverified: 0 };
+
+  for (let index = 0; index < pending.length; index += 5) {
+    await Promise.all(pending.slice(index, index + 5).map(async (transaction) => {
+      try {
+        const checkout = await stripe.checkout.sessions.retrieve(transaction.stripeSessionId);
+        const checkoutVendorId = checkout.metadata?.vendorId || checkout.client_reference_id;
+        if (checkout.mode !== "subscription" || String(checkoutVendorId || "") !== String(transaction.vendorId || "")) {
+          summary.unverified += 1;
+          return;
+        }
+        if (checkout.status === "complete" && ["paid", "no_payment_required"].includes(checkout.payment_status)) {
+          await markCheckoutPaid(checkout);
+          summary.confirmed += 1;
+        } else if (checkout.status === "expired") {
+          await db.collection("transactions").updateOne(
+            { _id: transaction._id, status: "pending" },
+            { $set: { status: "expired", updatedAt: new Date() } },
+          );
+          summary.expired += 1;
+        } else {
+          summary.stillPending += 1;
+        }
+      } catch {
+        summary.unverified += 1;
+      }
+    }));
+  }
+  return summary;
+}
 
 paymentsRouter.post("/create-portal-session", requireUser, requireRole("vendor"), asyncRoute(async (req, res) => {
   if (!stripe) return res.status(503).json({ message: "Stripe Test Mode is not configured." });
