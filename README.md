@@ -13,7 +13,7 @@ Express.js API for the WedPlan wedding planning platform. It uses MongoDB and va
 
 ## Technology
 
-Node.js, Express 5, MongoDB, Better Auth, JSON Web Tokens, Stripe, and ImgBB (uploads are proxied by the Next.js client server route).
+Node.js, Express 5, MongoDB, Better Auth, JSON Web Tokens, and Stripe. Image uploads are handled by the Next.js client.
 
 ## Repositories and deployment
 
@@ -23,16 +23,41 @@ Node.js, Express 5, MongoDB, Better Auth, JSON Web Tokens, Stripe, and ImgBB (up
 
 ## Run locally
 
-1. Install Node.js and MongoDB Atlas or a local MongoDB instance.
-2. Copy `.env.example` to `.env` and configure the variables below. Use the same `MONGODB_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL` as the client.
-3. Run:
+1. Install **Node.js 20 or newer** and create a MongoDB Atlas cluster (or run MongoDB locally).
+2. Install dependencies:
 
    ```bash
    npm install
+   ```
+
+3. Create your environment file:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   Then fill in `MONGODB_URL`, `BETTER_AUTH_SECRET`, and `JWT_SECRET`. Generate the two secrets with:
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+   ```
+
+   Use the **same** `MONGODB_URL`, `BETTER_AUTH_SECRET`, and `BETTER_AUTH_URL` as the WedPlan client.
+
+4. Start the API:
+
+   ```bash
    npm run dev
    ```
 
-The API listens on `http://localhost:5000` by default. Health check: `GET /api/health`.
+The API listens on `http://localhost:5000` by default. Verify it with:
+
+```bash
+curl http://localhost:5000/api/health
+curl http://localhost:5000/user
+```
+
+`GET /user` is a **development-only** helper that lists the users in the `user` collection (passwords are stored separately by Better Auth). It is automatically disabled when `NODE_ENV=production`.
 
 ## Deploy the API to Vercel
 
@@ -63,6 +88,7 @@ Keep the Vercel project Root Directory set to this server repository root. The r
 - `/api/admin/*` — admin overview, user moderation, service moderation, and read-only transactions.
 - `/api/payments/*` — subscription checkout, portal, status, and verified Stripe webhook handling.
 - `POST /api/auth/token` — exchange a Better Auth session for the HttpOnly JWT cookie used by this API.
+- `GET /user` — development-only list of users for local inspection; disabled in production.
 
 ## Stripe Test Mode
 
