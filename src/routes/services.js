@@ -45,7 +45,7 @@ servicesRouter.post("/", requireUser, requireRole("vendor"), asyncRoute(async (r
   if (input.error) return res.status(400).json({ message: input.error });
   const vendorId = String(req.user.id);
   const user = await users().findOne({ _id: { $in: idOptions(vendorId) } });
-  const premium = ["premium", "pro"].includes(String(user?.subscriptionPlan || "").toLowerCase());
+  const premium = /^premium(?:_|$)/i.test(String(user?.subscriptionPlan || "")) || String(user?.subscriptionPlan || "").toLowerCase() === "pro";
   if (!premium) {
     const activeCount = await services().countDocuments({ vendorId: { $in: idOptions(vendorId) }, isActive: true, status: "approved" });
     if (activeCount >= 3) return res.status(403).json({ message: "The free plan allows up to 3 active services. Upgrade to Premium to add more." });

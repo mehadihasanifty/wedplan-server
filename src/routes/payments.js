@@ -9,6 +9,22 @@ export const paymentsRouter = Router();
 const stripeSecret = process.env.STRIPE_SECRET_KEY?.trim();
 const stripe = stripeSecret?.startsWith("sk_test_") ? new Stripe(stripeSecret) : null;
 const priceId = process.env.STRIPE_PREMIUM_PRICE_ID?.trim();
+const premiumPlans = {
+  premium: { name: "Premium", amount: null },
+  premium_plus: { name: "Premium Plus", amount: 200 },
+  premium_pro: { name: "Premium Pro", amount: 300 },
+};
+
+function getPremiumPlan(value) {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(premiumPlans, value)
+    ? value
+    : "premium";
+}
+
+function toMinorUnits(amount, currency) {
+  const digits = new Intl.NumberFormat("en", { style: "currency", currency: String(currency || "USD").toUpperCase() }).resolvedOptions().maximumFractionDigits;
+  return Math.round(Number(amount) * (10 ** digits));
+}
 
 paymentsRouter.get("/subscription", requireUser, requireRole("vendor"), asyncRoute(async (req, res) => {
   const user = await authDb.collection("user").findOne({ _id: { $in: idOptions(req.user.id) } }, { projection: { subscriptionPlan: 1, subscriptionExpiresAt: 1, stripeSubscriptionStatus: 1, cancelAtPeriodEnd: 1 } });
@@ -35,22 +51,28 @@ paymentsRouter.post("/create-checkout-session", requireUser, requireRole("vendor
 
   const price = await stripe.prices.retrieve(priceId);
   if (!price.active || !price.recurring) return res.status(503).json({ message: "The configured Stripe price must be an active recurring price." });
+  if (price.recurring.interval !== "month") return res.status(503).json({ message: "The configured Premium Stripe price must use monthly billing." });
+  if (req.body?.plan !== undefined && !Object.prototype.hasOwnProperty.call(premiumPlans, req.body.plan)) return res.status(400).json({ message: "Choose one of the available Premium subscription plans." });
+  const plan = getPremiumPlan(req.body?.plan);
+  const selectedPlan = premiumPlans[plan];
   const base = (process.env.CLIENT_URL || "http://localhost:3000").split(",")[0].trim().replace(/\/$/, "");
   const customerId = req.user.stripeCustomerId;
   const checkout = await stripe.checkout.sessions.create({
     mode: "subscription",
-    line_items: [{ price: priceId, quantity: 1 }],
+    line_items: [plan === "premium"
+      ? { price: priceId, quantity: 1 }
+      : { price_data: { currency: price.currency, unit_amount: toMinorUnits(selectedPlan.amount, price.currency), recurring: { interval: "month" }, product_data: { name: `WedPlan ${selectedPlan.name}` } }, quantity: 1 }],
     ...(customerId ? { customer: customerId } : { customer_email: req.user.email }),
     success_url: `${base}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${base}/payment/cancel`,
     client_reference_id: String(req.user.id),
-    metadata: { vendorId: String(req.user.id), plan: "premium" },
-    subscription_data: { metadata: { vendorId: String(req.user.id), plan: "premium" } },
+    metadata: { vendorId: String(req.user.id), plan },
+    subscription_data: { metadata: { vendorId: String(req.user.id), plan } },
   });
 
   await db.collection("transactions").updateOne(
     { stripeSessionId: checkout.id },
-    { $setOnInsert: { vendorId: String(req.user.id), plan: "premium", amount: fromMinorUnits(price.unit_amount ?? 0, price.currency), currency: price.currency, status: "pending", stripeSessionId: checkout.id, createdAt: new Date() } },
+    { $setOnInsert: { vendorId: String(req.user.id), plan, amount: plan === "premium" ? fromMinorUnits(price.unit_amount ?? 0, price.currency) : selectedPlan.amount, currency: price.currency, status: "pending", stripeSessionId: checkout.id, createdAt: new Date() } },
     { upsert: true },
   );
   res.json({ url: checkout.url, sessionId: checkout.id });
@@ -111,10 +133,11 @@ export async function handleStripeWebhook(req, res) {
 async function markCheckoutPaid(checkout) {
   const vendorId = checkout.metadata?.vendorId || checkout.client_reference_id;
   if (!vendorId) return;
+  const plan = getPremiumPlan(checkout.metadata?.plan);
   const subscriptionId = stripeId(checkout.subscription);
   const subscription = subscriptionId ? await stripe.subscriptions.retrieve(subscriptionId) : null;
   const periodEnd = subscription?.current_period_end || subscription?.items?.data?.[0]?.current_period_end;
-  const paymentUpdate = { vendorId, plan: "premium", status: "succeeded", stripeSubscriptionId: subscriptionId || null };
+  const paymentUpdate = { vendorId, plan, status: "succeeded", stripeSubscriptionId: subscriptionId || null };
   if (typeof checkout.amount_total === "number") paymentUpdate.amount = fromMinorUnits(checkout.amount_total, checkout.currency || "USD");
   if (typeof checkout.currency === "string") paymentUpdate.currency = checkout.currency;
   await db.collection("transactions").updateOne(
@@ -122,16 +145,17 @@ async function markCheckoutPaid(checkout) {
     { $set: paymentUpdate, $setOnInsert: { createdAt: new Date() } },
     { upsert: true },
   );
-  await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", subscriptionExpiresAt: periodEnd ? new Date(periodEnd * 1000) : null, stripeCustomerId: stripeId(checkout.customer), stripeSubscriptionId: subscriptionId, stripeSubscriptionStatus: subscription?.status || "active", cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end), updatedAt: new Date() } });
+  await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: plan, subscriptionExpiresAt: periodEnd ? new Date(periodEnd * 1000) : null, stripeCustomerId: stripeId(checkout.customer), stripeSubscriptionId: subscriptionId, stripeSubscriptionStatus: subscription?.status || "active", cancelAtPeriodEnd: Boolean(subscription?.cancel_at_period_end), updatedAt: new Date() } });
 }
 
 async function syncSubscription(subscription, eventType) {
   const vendorId = await resolveVendorId(subscription.metadata?.vendorId, stripeId(subscription.customer));
   if (!vendorId) return;
   const active = ["active", "trialing"].includes(subscription.status);
+  const plan = getPremiumPlan(subscription.metadata?.plan);
   const periodEnd = subscription.current_period_end || subscription.items?.data?.[0]?.current_period_end;
   await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: {
-    subscriptionPlan: active ? "premium" : "free",
+    subscriptionPlan: active ? plan : "free",
     stripeCustomerId: stripeId(subscription.customer),
     stripeSubscriptionId: subscription.id,
     stripeSubscriptionStatus: eventType === "customer.subscription.deleted" ? "canceled" : subscription.status,
@@ -148,15 +172,16 @@ async function recordInvoice(invoice, eventType) {
   try { subscription = await stripe.subscriptions.retrieve(subscriptionId); } catch { return; }
   const vendorId = await resolveVendorId(subscription.metadata?.vendorId, stripeId(invoice.customer));
   if (!vendorId) return;
+  const plan = getPremiumPlan(subscription.metadata?.plan);
   const paid = eventType !== "invoice.payment_failed";
   await db.collection("transactions").updateOne(
     { stripeInvoiceId: invoice.id },
-    { $set: { vendorId, plan: "premium", amount: fromMinorUnits(paid ? invoice.amount_paid : invoice.amount_due, invoice.currency), currency: invoice.currency, status: paid ? "succeeded" : "failed", stripeInvoiceId: invoice.id, stripeSubscriptionId: subscriptionId }, $setOnInsert: { createdAt: invoice.status_transitions?.paid_at ? new Date(invoice.status_transitions.paid_at * 1000) : new Date((invoice.created || Date.now() / 1000) * 1000) } },
+    { $set: { vendorId, plan, amount: fromMinorUnits(paid ? invoice.amount_paid : invoice.amount_due, invoice.currency), currency: invoice.currency, status: paid ? "succeeded" : "failed", stripeInvoiceId: invoice.id, stripeSubscriptionId: subscriptionId }, $setOnInsert: { createdAt: invoice.status_transitions?.paid_at ? new Date(invoice.status_transitions.paid_at * 1000) : new Date((invoice.created || Date.now() / 1000) * 1000) } },
     { upsert: true },
   );
   if (paid && ["active", "trialing"].includes(subscription.status)) {
     const periodEnd = subscription.current_period_end || subscription.items?.data?.[0]?.current_period_end;
-    await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: "premium", subscriptionExpiresAt: periodEnd ? new Date(periodEnd * 1000) : null, stripeSubscriptionStatus: subscription.status, stripeCustomerId: stripeId(invoice.customer), stripeSubscriptionId: subscriptionId, updatedAt: new Date() } });
+    await authDb.collection("user").updateOne({ _id: { $in: idOptions(vendorId) } }, { $set: { subscriptionPlan: plan, subscriptionExpiresAt: periodEnd ? new Date(periodEnd * 1000) : null, stripeSubscriptionStatus: subscription.status, stripeCustomerId: stripeId(invoice.customer), stripeSubscriptionId: subscriptionId, updatedAt: new Date() } });
   }
 }
 

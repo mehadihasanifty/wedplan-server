@@ -99,7 +99,7 @@ adminRouter.patch("/services/:id", asyncRoute(async (req, res) => {
       if (!current) return res.status(404).json({ message: "Service not found." });
       const vendorId = String(current.vendorId || "");
       const vendor = vendorId ? await authDb.collection("user").findOne({ _id: { $in: idOptions(vendorId) } }) : null;
-      const premium = ["premium", "pro"].includes(String(vendor?.subscriptionPlan || "").toLowerCase());
+      const premium = /^premium(?:_|$)/i.test(String(vendor?.subscriptionPlan || "")) || String(vendor?.subscriptionPlan || "").toLowerCase() === "pro";
       if (!premium) {
         const activeCount = await db.collection("services").countDocuments({ vendorId: { $in: idOptions(vendorId) }, isActive: true, status: "approved", _id: { $ne: current._id } });
         if (activeCount >= 3) return res.status(409).json({ message: "This vendor has reached the Free plan limit of 3 active services." });
