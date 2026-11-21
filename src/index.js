@@ -62,6 +62,46 @@ app.use("/api/auth", authTokenRouter);
 app.use("/api/profile", profileRouter);
 app.use("/api/payments", paymentsRouter);
 
+app.get("/user", (_request, response) => {
+  const isProduction =
+    process.env.VERCEL_ENV === "production" ||
+    process.env.NODE_ENV === "production";
+  const configuredUrls = [
+    process.env.CLIENT_URL,
+    process.env.CLIENT_ORIGINS,
+    process.env.BETTER_AUTH_URL,
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS,
+  ]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(","))
+    .map((value) => {
+      try {
+        return new URL(value.trim());
+      } catch {
+        return null;
+      }
+    })
+    .filter((url) => {
+      if (!url || !["http:", "https:"].includes(url.protocol)) return false;
+      if (!isProduction) return true;
+      return (
+        url.protocol === "https:" &&
+        !["localhost", "127.0.0.1", "::1"].includes(url.hostname)
+      );
+    });
+  const clientUrl = configuredUrls[0];
+
+  if (!clientUrl) {
+    return response.status(503).json({
+      message:
+        "Set CLIENT_URL to the deployed WedPlan client URL in the server environment.",
+    });
+  }
+
+  const adminUsersUrl = new URL("/dashboard/admin/users", clientUrl);
+  return response.redirect(302, adminUsersUrl.toString());
+});
+
 app.use((_request, response) => response.status(404).json({ message: "API endpoint not found." }));
 app.use((error, _request, response, _next) => {
   console.error("WedPlan API error:", error);
@@ -80,4 +120,4 @@ app.use((error, _request, response, _next) => {
   response.status(status).json({ message });
 });
 
-app.listen(port, () => console.log(`WedPlan API server listening on`));
+app.listen(port, () => console.log("WedPlan API server listening on"));
