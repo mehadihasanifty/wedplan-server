@@ -9,6 +9,9 @@ const app = express();
 const port = Number(process.env.PORT) || 5000;
 const allowedOrigins = getAllowedClientOrigins();
 
+const mongoClient = new MongoClient(process.env.MONGODB_URL);
+const mongoDatabase = mongoClient.db("wedding_planning_platform");
+
 app.use(cors({
   origin(origin, callback) {
     if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
@@ -62,44 +65,14 @@ app.use("/api/auth", authTokenRouter);
 app.use("/api/profile", profileRouter);
 app.use("/api/payments", paymentsRouter);
 
-app.get("/user", (_request, response) => {
-  const isProduction =
-    process.env.VERCEL_ENV === "production" ||
-    process.env.NODE_ENV === "production";
-  const configuredUrls = [
-    process.env.CLIENT_URL,
-    process.env.CLIENT_ORIGINS,
-    process.env.BETTER_AUTH_URL,
-    process.env.BETTER_AUTH_TRUSTED_ORIGINS,
-  ]
-    .filter(Boolean)
-    .flatMap((value) => String(value).split(","))
-    .map((value) => {
-      try {
-        return new URL(value.trim());
-      } catch {
-        return null;
-      }
-    })
-    .filter((url) => {
-      if (!url || !["http:", "https:"].includes(url.protocol)) return false;
-      if (!isProduction) return true;
-      return (
-        url.protocol === "https:" &&
-        !["localhost", "127.0.0.1", "::1"].includes(url.hostname)
-      );
-    });
-  const clientUrl = configuredUrls[0];
+app.get("/user", async (_request, response) => {
+  const totalDocuments = await mongoDatabase.collection("user").countDocuments();
 
-  if (!clientUrl) {
-    return response.status(503).json({
-      message:
-        "Set CLIENT_URL to the deployed WedPlan client URL in the server environment.",
-    });
-  }
-
-  const adminUsersUrl = new URL("/dashboard/admin/users", clientUrl);
-  return response.redirect(302, adminUsersUrl.toString());
+  response.set("Cache-Control", "no-store").json({
+    collection: "user",
+    totalDocuments,
+    details: "Personal user details are available only in the admin dashboard.",
+  });
 });
 
 app.use((_request, response) => response.status(404).json({ message: "API endpoint not found." }));
