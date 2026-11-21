@@ -26,13 +26,8 @@ app.post("/api/payments/webhook", express.raw({ type: "application/json" }), asy
 });
 app.use(express.json({ limit: "2mb" }));
 
-app.get("/", (request, response) => {
-  const protocol =
-    request.get("x-forwarded-proto")?.split(",")[0] || request.protocol;
-  const host = request.get("host") || `localhost:${port}`;
-  response
-    .type("text/plain")
-    .send(`WedPlan API server listening on ${protocol}://${host}`);
+app.get("/", (_request, response) => {
+  response.type("text/plain").send("WedPlan API server listening on");
 });
 
 app.get("/api/health", (_request, response) => response.json({ status: "ok", service: "wedplan-server" }));
